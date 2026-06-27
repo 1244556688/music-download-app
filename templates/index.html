@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>專業級影音下載器 V3 - Web 控制台</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>body { background-color: #0f172a; color: #f8fafc; }</style>
+</head>
+<body class="p-6 max-w-5xl mx-auto">
+    <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-4">
+        <h1 class="text-2xl font-bold tracking-wide text-blue-400">⚡ 專業級影音下載器 V3 <span class="text-sm bg-blue-900 text-blue-200 px-2 py-0.5 rounded ml-2">All-in-One EXE</span></h1>
+        {% if not ffmpeg_status %}
+        <div class="bg-red-900/50 border border-red-500 text-red-200 px-3 py-1 rounded text-sm animate-pulse">⚠️ 未偵測到內置 FFmpeg，轉碼功能可能會受限！</div>
+        {% else %}
+        <div class="text-green-400 text-sm font-semibold">🟢 內置 FFmpeg 封裝成功、完美運作中</div>
+        {% endif %}
+    </div>
+
+    <div class="bg-slate-800 p-4 rounded-xl shadow-lg mb-6 border border-slate-700/50">
+        <div class="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+            <span>📁 目前下載儲存路徑：</span>
+            <span id="current-path-display" class="text-amber-400 font-mono bg-slate-900 px-2 py-0.5 rounded text-xs select-all">{{ current_dir }}</span>
+        </div>
+        <div class="flex gap-2">
+            <input type="text" id="path-input" value="{{ current_dir }}" placeholder="輸入新的絕對路徑 (例如 D:\\Videos)" class="flex-1 text-xs bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:border-amber-500">
+            <button onclick="updatePath()" class="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs px-4 py-1.5 rounded-lg transition cursor-pointer">更新路徑</button>
+        </div>
+    </div>
+
+    <div class="bg-slate-800 p-4 rounded-xl shadow-lg mb-6 flex gap-3">
+        <input type="text" id="url-input" placeholder="請輸入影片或播放清單網址..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+        <button onclick="addDownload()" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2 rounded-lg transition cursor-pointer">加入下載隊列</button>
+    </div>
+
+    <div class="bg-slate-800 p-5 rounded-xl shadow-lg mb-6">
+        <h2 class="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">🎚️ 客製化輸出規格設定</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div><label class="block text-xs text-slate-400 mb-1">下載模式</label><select id="mode" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.MODE_OPTIONS %}<option value="{{opt}}">{{opt}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">最高解析度</label><select id="resolution" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.RESOLUTION_OPTIONS %}<option value="{{opt}}">{{opt if opt=='BEST' else opt+'p'}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">幀率 (FPS)</label><select id="fps" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.FPS_OPTIONS %}<option value="{{opt}}">{{opt if opt=='BEST' else opt+' fps'}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">影片規格</label><select id="video_format" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.VIDEO_FORMATS %}<option value="{{opt}}">{{opt.upper()}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">影片編碼</label><select id="video_codec" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.VIDEO_CODECS %}<option value="{{opt}}">{{opt.upper()}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">音訊位元率</label><select id="audio_quality" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.AUDIO_QUALITIES %}<option value="{{opt}}">{{opt if opt=='LOSSLESS' else opt+' kbps'}}</option>{% endfor %}</select></div>
+            <div><label class="block text-xs text-slate-400 mb-1">音訊格式</label><select id="audio_format" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm text-slate-200">{% for opt in config.AUDIO_FORMATS %}<option value="{{opt}}">{{opt.upper()}}</option>{% endfor %}</select></div>
+        </div>
+    </div>
+
+    <div class="bg-slate-800 p-5 rounded-xl shadow-lg">
+        <h2 class="text-lg font-bold text-slate-300 mb-4 flex items-center gap-2">📋 實時下載任務佇列</h2>
+        <div id="queue-container" class="space-y-3">
+            <div class="text-slate-500 text-center py-6 text-sm">目前沒有下載任務</div>
+        </div>
+    </div>
+
+    <script>
+        function updatePath() {
+            const p = document.getElementById('path-input').value.trim();
+            if(!p) return alert('請輸入有效路徑！');
+            fetch('/api/path', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) })
+            .then(res => res.json()).then(res => {
+                if(res.success) {
+                    document.getElementById('current-path-display').innerText = res.path;
+                    alert('下載路徑更新成功！');
+                } else { alert('更新失敗：' + res.msg); }
+            });
+        }
+        function addDownload() {
+            const url = document.getElementById('url-input').value.trim();
+            if(!url) return alert('請輸入網址！');
+            const data = {
+                url: url, mode: document.getElementById('mode').value, resolution: document.getElementById('resolution').value,
+                fps: document.getElementById('fps').value, video_format: document.getElementById('video_format').value,
+                video_codec: document.getElementById('video_codec').value, audio_quality: document.getElementById('audio_quality').value,
+                audio_format: document.getElementById('audio_format').value
+            };
+            fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+            .then(res => res.json()).then(res => {
+                if(res.success) document.getElementById('url-input').value = '';
+                else alert('新增失敗！');
+            });
+        }
+        function cancelDownload(url) { fetch('/api/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) }); }
+        
+        setInterval(() => {
+            fetch('/api/status').then(res => res.json()).then(tasks => {
+                const container = document.getElementById('queue-container');
+                if(tasks.length === 0) { container.innerHTML = '<div class="text-slate-500 text-center py-6 text-sm">目前沒有下載任務</div>'; return; }
+                container.innerHTML = tasks.map(task => {
+                    let sc = 'text-blue-400'; let pb = 'bg-blue-600';
+                    if(task.status === 'completed') { sc = 'text-green-400'; pb = 'bg-green-500'; }
+                    if(task.status === 'failed') { sc = 'text-red-400'; pb = 'bg-red-500'; }
+                    if(task.status === 'cancelled') { sc = 'text-gray-400'; pb = 'bg-gray-500'; }
+                    
+                    // Fixed the string escaping here to be 100% compliant with standard JS string concat within literal
+                    return '<div class="bg-slate-900 p-4 rounded-lg border border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-3">' +
+                            '<div class="flex-1 min-w-0">' +
+                                '<div class="text-sm font-semibold truncate text-slate-200">' + task.title + '</div>' +
+                                '<div class="text-xs ' + sc + ' mt-1 font-mono">狀態: ' + task.status.toUpperCase() + ' | 速度: ' + task.speed + ' | 剩餘: ' + task.eta + '</div>' +
+                            '</div>' +
+                            '<div class="w-full md:w-48 bg-slate-800 rounded-full h-2.5 shadow-inner"><div class="' + pb + ' h-2.5 rounded-full transition-all" style="width: ' + task.percent + '%"></div></div>' +
+                            '<div class="text-right flex items-center justify-between md:justify-end gap-4">' +
+                                '<span class="text-sm font-mono font-bold text-slate-300">' + Math.floor(task.percent) + '%</span>' +
+                                (['queued', 'downloading'].includes(task.status) ? '<button onclick="cancelDownload(\'' + task.url + '\')" class="text-xs bg-red-950 text-red-400 border border-red-800 px-3 py-1 rounded">取消</button>' : '') +
+                            '</div>' +
+                        '</div>';
+                }).join('');
+            });
+        }, 1000);
+    </script>
+</body>
+</html>
